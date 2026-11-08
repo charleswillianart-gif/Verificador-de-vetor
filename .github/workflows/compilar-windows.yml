@@ -31,10 +31,10 @@ jobs:
 
       - name: Compilar aplicativo
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "Verificador_de_vetor_Cromotransfer" --icon "assets/logo_icone.ico" --collect-all PySide6 --collect-all pymupdf --add-data "assets;assets" app_desktop.py
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name "Verificador_de_vetor_Cromotransfer" --icon "assets/logo_icone.ico" --collect-all PySide6 --collect-all pymupdf --add-data "assets;assets" app_desktop.py
 
       - name: Criar pacote portátil ZIP
-        run: Compress-Archive -Path "dist/Verificador_de_vetor_Cromotransfer.exe" -DestinationPath "dist/Verificador_Cromotransfer_Portatil.zip" -Force
+        run: Compress-Archive -Path "dist/Verificador_de_vetor_Cromotransfer/*" -DestinationPath "dist/Verificador_Cromotransfer_Portatil.zip" -Force
 
       - name: Preparar Inno Setup
         run: choco install innosetup --yes --no-progress
@@ -47,7 +47,7 @@ jobs:
         with:
           name: Verificador_Cromotransfer_Windows
           path: |
-            dist/Verificador_de_vetor_Cromotransfer.exe
+            dist/Verificador_de_vetor_Cromotransfer/
             dist/Verificador_Cromotransfer_Portatil.zip
             dist/Verificador_Cromotransfer_Instalador.exe
           if-no-files-found: error
