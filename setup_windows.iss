@@ -1,5 +1,5 @@
 #define AppName "Verificador de vetor - Cromotransfer"
-#define AppVersion "1.0.0"
+#define AppVersion "1.1.3"
 #define AppExe "Verificador_de_vetor_Cromotransfer.exe"
 
 [Setup]
@@ -20,7 +20,7 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 
 [Files]
-Source: "dist\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "dist\Verificador_de_vetor_Cromotransfer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"

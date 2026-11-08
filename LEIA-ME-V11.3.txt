@@ -1,0 +1,24 @@
+VERIFICADOR DE VETOR - CROMOTRANSFER V11.3
+
+MELHORIAS
+- Zoom e navegação: renderização somente dos blocos visíveis do PDF, com cache limitado.
+- Ícone do programa: símbolo ampliado dentro do ícone, sem alterar a arte original.
+- Inicialização Windows: PyInstaller em modo --onedir, evitando a extração do --onefile a cada abertura.
+- Mantidos zoom seguindo o cursor, marcações vetoriais/rasterizadas e visual aprovado.
+
+COMO ATUALIZAR O GITHUB
+1. Extraia este ZIP no Windows.
+2. Envie app_desktop.py e assets/logo_icone.ico, assets/logo_icone.png, assets/logo_icone_1024.png para as mesmas posições do repositório.
+3. Atualize .github/workflows/compilar-windows.yml e setup_windows.iss.
+4. Para facilitar, você também pode substituir todos os arquivos do projeto preservando as pastas.
+5. Na aba Actions, execute 'Compilar executável Windows'.
+6. Em Artifacts, baixe o pacote Windows. Extraia Verificador_Cromotransfer_Portatil.zip.
+7. Abra Verificador_de_vetor_Cromotransfer.exe dentro da pasta extraída. NÃO separe o EXE dos arquivos que o acompanham.
+
+O arquivo dist/Verificador_Cromotransfer_Instalador.exe também pode ser usado, se for gerado com sucesso.
+
+OBSERVAÇÕES
+- A melhoria de velocidade depende do hardware, complexidade do PDF e antivírus.
+- O código foi verificado sintaticamente, mas o aplicativo Windows não foi executado neste ambiente.
+- Recomenda-se testar PDFs de uma e várias páginas, zoom 0%-300%, cursor, arrastar, análise e relatório.
+- A build macOS continua no fluxo separado e não foi alterada nesta versão.

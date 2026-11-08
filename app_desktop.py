@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from datetime import datetime
+from collections import OrderedDict
 import pymupdf as fitz
 from PySide6.QtCore import Qt, QPoint, QRect
 from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont, QIcon, QAction
@@ -17,7 +18,7 @@ RASTER = '#FF626D'
 BORDER = '#2C445D'
 BRAND_BLUE = '#2C445D'
 LOGO_COLOR = '#2C445D'
-APP_VERSION = '1.0.0'
+APP_VERSION = '1.1.3'
 
 def resource_path(relative_path):
     base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
@@ -52,7 +53,7 @@ class DropPreview(QLabel):
 
     def paintEvent(self, event):
         if self.document_loaded:
-            super().paintEvent(event)
+            self.window().paint_pdf_tiles(self, event)
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -157,6 +158,9 @@ class Verificador(QMainWindow):
         self.setAcceptDrops(True)
         self.doc = None; self.pdf_path = None; self.page_index = 0
         self.analysis = []; self.report_text = ''
+        self._tile_cache = OrderedDict()
+        self._tile_size = 512
+        self._render_scale = 1.0
         central = QWidget(); central.setObjectName('central'); self.setCentralWidget(central)
         root = QVBoxLayout(central); root.setContentsMargins(22, 20, 22, 20); root.setSpacing(14)
         header = QHBoxLayout(); titles = QVBoxLayout()
@@ -316,6 +320,7 @@ class Verificador(QMainWindow):
             self.doc = new_doc; self.pdf_path = Path(path); self.page_index = 0; self.analysis = []; self.report_text = ''
             if old_doc is not None:
                 old_doc.close()
+            self._tile_cache.clear()
             self.zoom_slider.setValue(0)
             self.open_btn.setEnabled(False)
             self.open_btn.setText('PDF carregado')
@@ -340,7 +345,7 @@ class Verificador(QMainWindow):
             self.analysis.append({'drawings': rects, 'images': images, 'vcount': len(drawings), 'rcount': len(images)})
             report.append(f'Página {i+1}: desenhos/vetores detectados={len(drawings)}; posições de imagens rasterizadas detectadas={len(images)}')
         report.extend(['', 'As caixas são aproximadas e a contagem de desenhos não certifica que toda a arte esteja vetorizada.', 'Conteúdo duvidoso deve ser conferido no software de arte-final apropriado.'])
-        self.report_text = '\n'.join(report); self.render_page()
+        self.report_text = '\n'.join(report); self.preview.update()
 
     def update_summary(self):
         if not self.analysis: return
@@ -353,36 +358,87 @@ class Verificador(QMainWindow):
         self.page_label.setText(f'Página {self.page_index+1} de {self.doc.page_count}')
 
     def render_page(self):
-        if not self.doc: return
+        """Resize the virtual page only; actual PDF pixels are rendered in visible tiles."""
+        if not self.doc:
+            return
         page = self.doc.load_page(self.page_index)
-        # Renderizar novamente em alta resolução conforme o zoom evita ampliar apenas uma miniatura.
         zoom_value = self.zoom_slider.value()
         if zoom_value == 0:
-            # 0% significa ajustar a página inteira à área visível, sem ampliação.
             viewport = self.preview_scroll.viewport().size()
             available_w = max(1, viewport.width() - 24)
             available_h = max(1, viewport.height() - 24)
             render_scale = min(available_w / page.rect.width, available_h / page.rect.height)
         else:
-            # Mantém o comportamento visual anterior: 50% corresponde a escala 1:1.
             render_scale = zoom_value / 50.0
-        pix = page.get_pixmap(matrix=fitz.Matrix(render_scale, render_scale), alpha=False, annots=True)
-        img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format_RGB888).copy(); rendered = QPixmap.fromImage(img)
-        if self.analysis:
-            p = QPainter(rendered); p.setRenderHint(QPainter.Antialiasing); sx = rendered.width()/page.rect.width; sy = rendered.height()/page.rect.height; d = self.analysis[self.page_index]
-            p.setPen(QPen(QColor(VECTOR), 6))
-            for rect in d['drawings']:
-                r = fitz.Rect(rect); p.drawRoundedRect(int(r.x0*sx), int(r.y0*sy), max(1,int(r.width*sx)), max(1,int(r.height*sy)), 4, 4)
-            p.setPen(QPen(QColor(RASTER), 6, Qt.DashLine))
-            for rect in d['images']:
-                r = fitz.Rect(rect); p.drawRoundedRect(int(r.x0*sx), int(r.y0*sy), max(1,int(r.width*sx)), max(1,int(r.height*sy)), 4, 4)
-            p.end()
-        self.original_preview = rendered
-        self.preview.setPixmap(rendered)
-        self.preview.set_document_loaded(True)
-        self.preview.setFixedSize(rendered.size())
+        self._render_scale = max(0.01, render_scale)
+        self._tile_cache.clear()
+        width = max(1, round(page.rect.width * self._render_scale))
+        height = max(1, round(page.rect.height * self._render_scale))
+        self.preview.setFixedSize(width, height)
+        self.preview.update()
         self.page_label.setText(f'Página {self.page_index+1} de {self.doc.page_count}')
-        if self.analysis: self.update_summary()
+        if self.analysis:
+            self.update_summary()
+
+    def paint_pdf_tiles(self, widget, event):
+        """Render only visible 512px tiles and reuse them during panning.
+
+        This avoids multi-megapixel full-page rasterization at 200-300% zoom.
+        """
+        if not self.doc:
+            return
+        painter = QPainter(widget)
+        painter.fillRect(event.rect(), QColor('#FFFFFF'))
+        scale = self._render_scale
+        page = self.doc.load_page(self.page_index)
+        tile_size = self._tile_size
+        visible = event.rect().intersected(widget.rect())
+        if visible.isEmpty():
+            painter.end()
+            return
+        left, right = visible.left() // tile_size, visible.right() // tile_size
+        top, bottom = visible.top() // tile_size, visible.bottom() // tile_size
+        for ty in range(top, bottom + 1):
+            for tx in range(left, right + 1):
+                key = (self.page_index, round(scale, 6), tx, ty)
+                pixmap = self._tile_cache.get(key)
+                if pixmap is None:
+                    x0, y0 = tx * tile_size, ty * tile_size
+                    x1 = min(widget.width(), x0 + tile_size)
+                    y1 = min(widget.height(), y0 + tile_size)
+                    clip = fitz.Rect(x0 / scale, y0 / scale, x1 / scale, y1 / scale) & page.rect
+                    if clip.is_empty:
+                        continue
+                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), clip=clip,
+                                          alpha=False, annots=True)
+                    qimage = QImage(pix.samples, pix.width, pix.height, pix.stride,
+                                    QImage.Format_RGB888).copy()
+                    pixmap = (QPixmap.fromImage(qimage), pix.x, pix.y)
+                    self._tile_cache[key] = pixmap
+                    # Bound memory: at most 24 tiles, ~19 MB for RGB pixels.
+                    while len(self._tile_cache) > 24:
+                        self._tile_cache.popitem(last=False)
+                else:
+                    self._tile_cache.move_to_end(key)
+                painter.drawPixmap(pixmap[1], pixmap[2], pixmap[0])
+        if self.analysis and self.page_index < len(self.analysis):
+            d = self.analysis[self.page_index]
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(QPen(QColor(VECTOR), 6))
+            for rect in d['drawings']:
+                r = fitz.Rect(rect)
+                qr = QRect(round(r.x0 * scale), round(r.y0 * scale),
+                           max(1, round(r.width * scale)), max(1, round(r.height * scale)))
+                if qr.intersects(visible):
+                    painter.drawRoundedRect(qr, 4, 4)
+            painter.setPen(QPen(QColor(RASTER), 6, Qt.DashLine))
+            for rect in d['images']:
+                r = fitz.Rect(rect)
+                qr = QRect(round(r.x0 * scale), round(r.y0 * scale),
+                           max(1, round(r.width * scale)), max(1, round(r.height * scale)))
+                if qr.intersects(visible):
+                    painter.drawRoundedRect(qr, 4, 4)
+        painter.end()
 
     def on_zoom_changed(self, value):
         self.zoom_label.setText('Ajustar' if value == 0 else f'{value}%')
