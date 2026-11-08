@@ -1,0 +1,68 @@
+VERIFICADOR DE VETOR - CROMOTRANSFER — V11.2
+
+MELHORIAS DESTA VERSÃO
+- Área de pré-visualização vazia sem contorno próprio, com a logo PDF vetorial fornecida pelo usuário (convertida em PNG de alta resolução para o app) centralizada e texto na mesma cor da logo: “clique aqui ou arraste seu PDF”. Clicar abre o seletor; arrastar e soltar funciona somente antes de carregar um documento.
+- Depois de carregar um PDF, a área muda para navegação por clique e arraste e zoom pela roda do mouse.
+- O botão “Abrir um novo PDF” agora usa o mesmo tamanho e estilo de texto dos botões principais.
+- Antes de abrir um PDF, é possível arrastar e soltar um arquivo PDF sobre a área de pré-visualização para carregá-lo. Depois de abrir um documento, o arrastar e soltar fica desativado para não conflitar com a navegação.
+- Clique e arraste com o botão esquerdo do mouse sobre a pré-visualização para navegar pela página ampliada.
+- A roda do mouse sobre a pré-visualização aumenta ou reduz o zoom em passos de 10%.
+- O botão “Abrir um novo PDF”, abaixo de “Analisar PDF”, permite substituir o documento atual por outro; após a troca, a análise anterior é limpa e o zoom volta a 50%.
+- O zoom vai de 0% a 300%; em 0%, a página inteira é ajustada à área visível. O zoom inicia em 50% e volta a 50% ao carregar o PDF. O indicador do controle deslizante é branco.
+- Barra de navegação horizontal mais alta e com alça mais visível; a barra vertical também foi ampliada.
+- Mantida a renderização em resolução maior conforme o zoom, limitada à qualidade do PDF original.
+- Mantidas as marcações aproximadas: verde contínuo para desenhos/vetores e vermelho tracejado para imagens rasterizadas.
+
+GERAR O EXECUTÁVEL WINDOWS
+Este pacote contém o código-fonte, a logo em assets/logo_pdf.png e os arquivos para compilar o executável. Ele ainda NÃO contém o .exe pronto: o ambiente de preparação não é Windows e não possui PySide6/PyInstaller para gerar e testar um executável Windows nativo.
+
+Opção A — em um PC Windows:
+1. Instale Python 3.11+ de https://www.python.org/downloads/windows/ (marque “Add Python to PATH”).
+2. Extraia o ZIP.
+3. Dê dois cliques em Gerar_EXE_e_Atalho.bat e aguarde a compilação.
+4. O arquivo ficará em dist\Verificador_de_vetor_Cromotransfer.exe.
+
+Opção B — compilação remota pelo GitHub Actions, sem CMD local:
+1. Crie um repositório no GitHub.
+2. Envie o CONTEÚDO desta pasta para a raiz do repositório (incluindo a pasta .github).
+3. Abra Actions > “Compilar executável Windows” > Run workflow.
+4. Ao concluir, baixe o artefato “Verificador_Cromotransfer_Windows” e extraia o EXE.
+
+PARA O AMIGO TESTAR
+Envie o .exe compilado. Ele foi configurado para incluir as dependências e não exigir Python instalado. O Smart App Control/Defender ainda pode exibir um aviso, pois o programa não tem assinatura digital comercial; não desative as proteções do Windows. Se o arquivo for bloqueado, solicite validação da TI ou teste em um computador de confiança.
+
+OBSERVAÇÃO
+A contagem de desenhos/imagens é uma triagem aproximada, não certifica que a arte inteira seja vetorial. Teste a aplicação em Windows antes de considerar o executável pronto para uso.
+
+
+GERAR O APLICATIVO macOS
+O pacote também inclui o workflow .github/workflows/compilar-macos.yml. Ele permite compilar um aplicativo .app em um runner macOS pelo GitHub Actions, sem precisar usar o Terminal no computador do usuário para compilar.
+
+1. Envie o conteúdo desta pasta para a raiz de um repositório GitHub (incluindo a pasta .github).
+2. Abra Actions > “Compilar aplicativo macOS” > Run workflow.
+3. Ao concluir, baixe o artefato “Verificador_Cromotransfer_macOS” e extraia o ZIP.
+4. Dentro dele estará o aplicativo .app. Copie-o para Aplicativos ou para a pasta desejada.
+
+IMPORTANTE SOBRE O MAC
+- O aplicativo é compilado em um runner macOS e pode ser específico à arquitetura usada pelo runner (Apple Silicon ou Intel). Se não abrir no Mac de destino, será necessário compilar para a arquitetura compatível.
+- Como o aplicativo não é assinado/notarizado com uma identidade Apple Developer, o macOS pode mostrar aviso de segurança. Não desative as proteções do sistema; peça validação à TI ou use uma versão assinada/notarizada quando for distribuir amplamente.
+- O ambiente de preparação não tem macOS, então não foi possível executar nem validar a interface ou o bundle .app aqui. O workflow precisa ser executado no GitHub Actions para gerar o artefato.
+
+
+V10: pré-visualização centralizada e zoom inicial em 0% (ajustar página à área visível), aplicados ao código compartilhado por Windows e macOS.
+
+
+V11 — IDENTIDADE VISUAL E DISTRIBUIÇÃO
+- Logo Cromotransfer incorporada ao cabeçalho.
+- Ícone do aplicativo derivado de Logo_icone_CROMO.eps.
+- A cor de contorno e destaque usa o azul da marca (#2C445D).
+- Tela de abertura e menu Ajuda > Sobre adicionados; versão 1.0.0.
+- Workflow Windows publica executável, ZIP portátil e instalador Inno Setup.
+- Workflow macOS compila e empacota o aplicativo .app em ZIP com ícone da marca.
+- Os artefatos precisam ser gerados executando os workflows; este pacote contém código e configuração, não executáveis finais.
+
+
+V11.2 — AJUSTES DE ZOOM E CORES
+- O zoom pela roda do mouse usa como referência a posição do cursor na área de pré-visualização.
+- O título “Verificador de vetor” usa azul mais claro que o azul principal da marca.
+- O título “Pré-visualização” usa o azul Cromotransfer (#2C445D).

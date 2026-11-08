@@ -1,0 +1,26 @@
+VERIFICADOR DE VETOR - CROMOTRANSFER | PACOTE PARA GITHUB
+Versão do projeto: V11.2
+
+ESTE PACOTE AINDA NÃO CONTÉM UM EXECUTÁVEL WINDOWS PRONTO.
+Ele contém o código-fonte e a configuração para que o GitHub Actions gere o .exe em um ambiente Windows.
+
+COMO GERAR O EXECUTÁVEL SEM INSTALAR PYTHON NO SEU COMPUTADOR
+1. Crie uma conta em https://github.com/ e entre nela.
+2. Clique no + no canto superior direito e escolha New repository.
+3. Dê um nome ao repositório, por exemplo: verificador-cromotransfer.
+4. Selecione Private para manter o código privado (recomendado para o projeto da empresa) e clique em Create repository.
+5. Abra Add file > Upload files. Extraia este ZIP no computador e envie o CONTEÚDO desta pasta para a raiz do repositório: app_desktop.py, requirements.txt, setup_windows.iss, assets, .github e os arquivos LEIA-ME.
+   IMPORTANTE: a pasta .github é oculta em alguns sistemas. Se não conseguir enviar essa pasta pelo navegador, crie o workflow manualmente conforme o passo 6.
+6. Confira se existe o arquivo .github/workflows/compilar-windows.yml. Se a pasta .github não tiver sido enviada, no GitHub clique Add file > Create new file e no nome do arquivo escreva exatamente:
+   .github/workflows/compilar-windows.yml
+   Cole o conteúdo do arquivo compilar-windows.yml que veio neste pacote e confirme em Commit changes.
+7. Na página do repositório, abra Actions. Se aparecer uma confirmação para habilitar workflows, aceite.
+8. Na lista de workflows, selecione “Compilar executável Windows” e clique Run workflow > Run workflow.
+9. Aguarde a execução terminar com um sinal verde. Abra a execução concluída e, na seção Artifacts, baixe Verificador_Cromotransfer_Windows.
+10. Extraia o artefato. Ele deve conter o executável, um ZIP portátil e o instalador Windows. Para seu amigo testar sem instalar, envie o EXE ou o ZIP portátil.
+
+OBSERVAÇÕES IMPORTANTES
+- A compilação ainda precisa ser executada no GitHub Actions; o pacote não contém .exe pronto.
+- Não foi possível executar nem validar a interface em um Windows real neste ambiente. Após a primeira compilação, teste o EXE no seu computador antes de distribuir.
+- O Windows pode avisar que o aplicativo é desconhecido ou não assinado digitalmente. Não desative o Defender nem outras proteções para contornar avisos; se houver bloqueio, solicite validação à TI.
+- Mantenha o repositório privado caso o código, os logos ou outros arquivos sejam internos da empresa.

@@ -1,0 +1,36 @@
+VERIFICADOR DE VETOR - CROMOTRANSFER
+
+VERSAO 1.0.0 — RELEASE CANDIDATE
+
+IDENTIDADE VISUAL
+- Logo oficial Cromotransfer no cabeçalho, conforme o PDF de referência.
+- Contornos, foco, controles e elementos de interface com o azul da marca (#2C445D).
+- Ícone do aplicativo baseado no vetor Logo_icone_CROMO.
+- Tela de abertura com a logo e menu Ajuda > Sobre.
+- Versão 1.0.0 exibida no rodapé.
+- Zoom 0 rotulado como “Ajustar”, para indicar ajuste à janela.
+
+ALTERACOES DESTA VERSAO
+- Logo de PDF fornecida pelo usuário centralizada na área inicial; texto na mesma cor da logo.
+- Área vazia sem contorno próprio. Clique ou arraste um PDF para carregar.
+- Após carregar, clique e arraste navega pela página; a roda do mouse controla o zoom.
+- Zoom de 0% a 300%: 0% ajusta a página inteira à área de pré-visualização.
+- Controle deslizante de zoom com indicador branco.
+- Botão “Abrir um novo PDF” permite substituir o documento atual.
+- Verde contínuo para desenhos/vetores detectados e vermelho tracejado para imagens rasterizadas.
+
+CRIAR EXECUTAVEL WINDOWS
+- Para compilar localmente, extraia o ZIP e execute Gerar_EXE_e_Atalho.bat. Esse método exige Python e internet no computador de compilação.
+- Para obter o EXE, ZIP portátil e instalador sem configurar Python localmente, envie o projeto a um repositório GitHub e execute Actions > Compilar executável Windows > Run workflow.
+- O workflow publica os artefatos Verificador_de_vetor_Cromotransfer.exe, Verificador_Cromotransfer_Portatil.zip e Verificador_Cromotransfer_Instalador.exe.
+
+COMPILACAO macOS
+O pacote inclui .github/workflows/compilar-macos.yml para compilar o aplicativo .app em runner macOS pelo GitHub Actions. Envie o projeto ao GitHub e execute Actions > Compilar aplicativo macOS > Run workflow; baixe o artefato Verificador_Cromotransfer_macOS.
+
+OBSERVACOES
+- Este ZIP contém o código e os scripts de build, não executáveis já compilados.
+- Windows/macOS podem mostrar avisos de segurança para apps sem assinatura/notarização. Não desative proteções; solicite validação à equipe de TI.
+- A análise é preliminar; contornos aproximados não certificam que toda a arte esteja vetorizada.
+
+
+Atualização V10: a área vazia centraliza o ícone e o texto; a página carregada fica centralizada na área de pré-visualização; o zoom inicia em 0%, que ajusta a página inteira à área visível.
