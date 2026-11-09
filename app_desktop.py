@@ -1,4 +1,5 @@
 import math
+import traceback
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -14,18 +15,43 @@ BG = '#071426'
 WHITE = '#0D1D34'
 TEXT = '#EAF1FA'
 MUTED = '#66758B'
-VECTOR = '#36D17C'
-RASTER = '#FF626D'
-EMBEDDED = '#F5C84C'
+VECTOR = '#00F58A'
+RASTER = '#FF315B'
+EMBEDDED = '#FFD900'
 BORDER = '#2C445D'
 BRAND_BLUE = '#2C445D'
 LOGO_COLOR = '#2C445D'
-APP_VERSION = '1.1.23'
+APP_VERSION = '1.1.30'
 
 def resource_path(relative_path):
     base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
     return base / relative_path
 
+
+
+def eye_icon(visible):
+    """Ícone de olho desenhado em Qt, sem dependência de fontes externas."""
+    pix = QPixmap(24, 24)
+    pix.fill(Qt.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.Antialiasing)
+    pen = QPen(QColor('#D7E8FA'), 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+    outline = QPainterPath()
+    outline.moveTo(2, 12)
+    outline.cubicTo(7, 4, 17, 4, 22, 12)
+    outline.cubicTo(17, 20, 7, 20, 2, 12)
+    painter.drawPath(outline)
+    painter.setBrush(QColor('#D7E8FA'))
+    painter.drawEllipse(QRectF(9, 9, 6, 6))
+    if not visible:
+        painter.setPen(QPen(QColor('#142849'), 4, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(3, 21, 21, 3)
+        painter.setPen(QPen(QColor('#FFB4BA'), 2, Qt.SolidLine, Qt.RoundCap))
+        painter.drawLine(3, 21, 21, 3)
+    painter.end()
+    return QIcon(pix)
 
 
 class GuidanceIllustration(QWidget):
@@ -304,6 +330,7 @@ class Verificador(QMainWindow):
         self.setAcceptDrops(True)
         self.doc = None; self.pdf_path = None; self.page_index = 0
         self.analysis = []; self.report_text = ''
+        self.show_indicators = True
         self._tile_cache = OrderedDict()
         self._tile_size = 256
         self._render_scale = 1.0
@@ -343,6 +370,13 @@ class Verificador(QMainWindow):
         self.prev_btn = QPushButton('← Anterior'); self.prev_btn.setObjectName('secondary'); self.prev_btn.clicked.connect(self.prev_page); self.prev_btn.setEnabled(False)
         self.next_btn = QPushButton('Próxima →'); self.next_btn.setObjectName('secondary'); self.next_btn.clicked.connect(self.next_page); self.next_btn.setEnabled(False)
         row.addWidget(self.prev_btn); row.addWidget(self.next_btn)
+        self.indicators_btn = QPushButton()
+        self.indicators_btn.setObjectName('secondary')
+        self.indicators_btn.setFixedSize(36, 36)
+        self.indicators_btn.setIcon(eye_icon(True))
+        self.indicators_btn.setIconSize(QRect(0, 0, 24, 24).size())
+        self.indicators_btn.setToolTip('Ocultar indicadores')
+        self.indicators_btn.clicked.connect(self.toggle_indicators)
         self.zoom_out_btn = QPushButton('−'); self.zoom_out_btn.setObjectName('secondary'); self.zoom_out_btn.setFixedWidth(38)
         self.zoom_out_btn.clicked.connect(lambda: self.zoom_slider.setValue(max(0, self.zoom_slider.value() - 10)))
         self.zoom_label = QLabel('Ajustar'); self.zoom_label.setObjectName('pageLabel')
@@ -354,6 +388,13 @@ class Verificador(QMainWindow):
         pv.addLayout(row)
         self.preview = DropPreview(self.open_pdf, self); self.preview.setObjectName('preview'); self.preview.setAlignment(Qt.AlignCenter); self.preview.setMinimumSize(440, 540); self.preview.setScaledContents(False); self.preview.setToolTip('Clique aqui ou arraste um PDF para carregar; após carregar, clique e arraste para navegar')
         self.preview_scroll = QScrollArea(); self.preview_scroll.setObjectName('previewScroll'); self.preview_scroll.setWidgetResizable(True); self.preview_scroll.setAlignment(Qt.AlignCenter); self.preview_scroll.setWidget(self.preview); self.preview_scroll.setMinimumSize(440, 540); self.preview.set_scroll_area(self.preview_scroll); self.preview.set_document_loaded(False); pv.addWidget(self.preview_scroll, 1)
+        # Controle discreto no canto inferior esquerdo do painel de pré-visualização.
+        # Fora da área rolável: permanece visível mesmo com zoom ou rolagem.
+        indicators_row = QHBoxLayout()
+        indicators_row.setContentsMargins(0, 0, 0, 0)
+        indicators_row.addWidget(self.indicators_btn, 0, Qt.AlignLeft)
+        indicators_row.addStretch(1)
+        pv.addLayout(indicators_row)
         splitter.addWidget(preview_card)
         # Painel rolável: em janelas baixas, os botões mantêm espaço e não se sobrepõem.
         result_scroll = QScrollArea(); result_scroll.setObjectName('resultScroll')
@@ -603,6 +644,23 @@ class Verificador(QMainWindow):
         if not self.doc:
             return
         self.analysis = []
+        self.analyze_btn.setEnabled(False)
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self._analyze_pdf_contents()
+        except Exception as exc:
+            self.analysis = []
+            self.report_text = ''
+            self.summary.setText('Não foi possível concluir a análise deste PDF.')
+            QMessageBox.critical(self, 'Erro na análise do PDF',
+                                 f'{type(exc).__name__}: {exc}\n\n'
+                                 'O documento permanece aberto. Tente outro PDF.')
+            traceback.print_exc()
+        finally:
+            QApplication.restoreOverrideCursor()
+            self.analyze_btn.setEnabled(self.doc is not None)
+
+    def _analyze_pdf_contents(self):
         report = ['VERIFICADOR DE VETOR - CROMOTRANSFER — RELATÓRIO DE TRIAGEM',
                   f'Arquivo: {self.pdf_path.name}', f'Páginas: {self.doc.page_count}', '']
         for i in range(self.doc.page_count):
@@ -613,6 +671,8 @@ class Verificador(QMainWindow):
             # alguns pixels da cor do preenchimento sobrevivem na página final.
             # Não aplicar esse teste a texto escuro, traços ou gradientes.
             rendered = None
+            rendered_pixels = None
+            rendered_scale = 1.0
             seen_paths = set()
             visible_drawings = []
             for d in drawings:
@@ -635,15 +695,24 @@ class Verificador(QMainWindow):
                 if (fill and d.get('type') == 'f' and min(fill) > 0.18
                         and clipped.get_area() < page.rect.get_area() * 0.025):
                     if rendered is None:
-                        rendered = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                        # Limita a imagem auxiliar a ~4 milhões de pixels,
+                        # evitando picos de memória em PDFs de grande formato.
+                        area = max(1.0, page.rect.width * page.rect.height)
+                        rendered_scale = min(1.5, math.sqrt(4_000_000 / area))
+                        rendered = page.get_pixmap(
+                            matrix=fitz.Matrix(rendered_scale, rendered_scale),
+                            alpha=False)
+                        # samples cria uma cópia completa a cada acesso.
+                        # samples_mv mantém uma visão sem copiar o bitmap.
+                        rendered_pixels = rendered.samples_mv
                     target = tuple(round(v * 255) for v in fill)
                     matched = False
                     for gy in range(1, 16):
                         for gx in range(1, 16):
-                            px = min(rendered.width - 1, max(0, int((clipped.x0 + clipped.width * gx / 16) * 1.5)))
-                            py = min(rendered.height - 1, max(0, int((clipped.y0 + clipped.height * gy / 16) * 1.5)))
+                            px = min(rendered.width - 1, max(0, int((clipped.x0 + clipped.width * gx / 16) * rendered_scale)))
+                            py = min(rendered.height - 1, max(0, int((clipped.y0 + clipped.height * gy / 16) * rendered_scale)))
                             offset = (py * rendered.width + px) * rendered.n
-                            rgb = rendered.samples[offset:offset + 3]
+                            rgb = rendered_pixels[offset:offset + 3]
                             if len(rgb) == 3 and max(abs(rgb[k] - target[k]) for k in range(3)) <= 28:
                                 matched = True
                                 break
@@ -652,6 +721,8 @@ class Verificador(QMainWindow):
                     if not matched:
                         continue
                 visible_drawings.append(tuple(clipped))
+            rendered_pixels = None
+            rendered = None
             rects = visible_drawings
             embedded, raster = [], []
             try:
@@ -693,6 +764,37 @@ class Verificador(QMainWindow):
                 # Nunca colocar uma imagem rasterizada em amarelo apenas
                 # porque está incorporada ao PDF.
                 embedded = [r for r in embedded if r not in raster]
+                # PDFs exportados pelo Illustrator podem usar gradientes / padrões
+                # dentro de um caminho de recorte sem criar imagem XObject.
+                # Nesses casos, get_image_info retorna bbox vazia e get_bboxlog
+                # retorna limites infinitos. A geometria útil está nos clips.
+                if any(kind == 'fill-shade' for kind, _ in ops):
+                    clip_candidates = []
+                    for path in page.get_drawings(extended=True):
+                        if path.get('type') != 'clip':
+                            continue
+                        scissor = path.get('scissor')
+                        if scissor is None:
+                            continue
+                        candidate = valid_rect(tuple(scissor))
+                        if candidate is None:
+                            continue
+                        rect = fitz.Rect(candidate)
+                        # Desconsiderar clips de página inteira e micro-recortes
+                        # de detalhes internos; manter a máscara principal.
+                        fraction = rect.get_area() / max(page.rect.get_area(), 1)
+                        if not 0.003 <= fraction <= 0.85:
+                            continue
+                        clip_candidates.append((path.get('level', 999), candidate))
+                    # Os clips de menor nível geralmente representam o objeto
+                    # externo, evitando dezenas de caixas sobre a mesma arte.
+                    if clip_candidates:
+                        min_level = min(level for level, _ in clip_candidates)
+                        main_clips = [r for level, r in clip_candidates
+                                      if level == min_level]
+                        for r in dict.fromkeys(main_clips):
+                            if r not in embedded and r not in raster:
+                                embedded.append(r)
             except Exception as exc:
                 report.append(f'AVISO página {i+1}: falha ao inspecionar gráficos: {type(exc).__name__}: {exc}')
                 print(f'[Verificador] Falha ao inspecionar gráficos da página {i+1}: {exc}')
@@ -711,12 +813,17 @@ class Verificador(QMainWindow):
         self.update_summary()
         self.update_guidance_card()
         self.preview.update()
-        dialog = GuidanceDialog(any(item['vcount'] > 0 for item in self.analysis), self)
-        dialog.exec()
+        QApplication.restoreOverrideCursor()
+        try:
+            dialog = GuidanceDialog(self.analysis[self.page_index]['vcount'] > 0, self)
+            dialog.exec()
+        finally:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
 
     def update_guidance_card(self):
-        """Orienta o comercial pelo resultado do documento completo."""
-        found_vectors = any(item['vcount'] > 0 for item in self.analysis)
+        """Orienta o comercial pelo resultado da página atualmente exibida."""
+        found_vectors = bool(self.analysis and self.page_index < len(self.analysis) and
+                             self.analysis[self.page_index]['vcount'] > 0)
         if found_vectors:
             self.guidance_message.setText('Ótimo, foram encontrados vetores, veja se estão de acordo com a arte solicitada e envie para o arte finalista!')
             self.guidance_icon.setText('✓')
@@ -752,6 +859,7 @@ class Verificador(QMainWindow):
         self.embedded_count.setText(f'Imagens incorporadas/ máscara de recorte: {e}')
         self.raster_count.setText(f'Imagens rasterizadas/PNG: {r}')
         self.page_label.setText(f'Página {self.page_index+1} de {self.doc.page_count}')
+        self.update_guidance_card()
 
     def render_page(self):
         """Resize the virtual page only; actual PDF pixels are rendered in visible tiles."""
@@ -778,6 +886,13 @@ class Verificador(QMainWindow):
         self.page_label.setText(f'Página {self.page_index+1} de {self.doc.page_count}')
         if self.analysis:
             self.update_summary()
+
+    def toggle_indicators(self):
+        """Alterna somente a exibição dos contornos, sem alterar os resultados."""
+        self.show_indicators = not self.show_indicators
+        self.indicators_btn.setIcon(eye_icon(self.show_indicators))
+        self.indicators_btn.setToolTip('Ocultar indicadores' if self.show_indicators else 'Mostrar indicadores')
+        self.preview.update()
 
     def paint_pdf_tiles(self, widget, event):
         """Render only visible 512px tiles and reuse them during panning.
@@ -820,30 +935,30 @@ class Verificador(QMainWindow):
                 else:
                     self._tile_cache.move_to_end(key)
                 painter.drawPixmap(pixmap[1], pixmap[2], pixmap[0])
-        if self.analysis and self.page_index < len(self.analysis):
+        if self.show_indicators and self.analysis and self.page_index < len(self.analysis):
             d = self.analysis[self.page_index]
             painter.setRenderHint(QPainter.Antialiasing)
-            painter.setPen(QPen(QColor(VECTOR), 6))
-            for rect in d['drawings']:
-                r = fitz.Rect(rect)
-                qr = QRect(round(r.x0 * scale), round(r.y0 * scale),
-                           max(1, round(r.width * scale)), max(1, round(r.height * scale)))
-                if qr.intersects(visible):
-                    painter.drawRoundedRect(qr, 4, 4)
-            painter.setPen(QPen(QColor(EMBEDDED), 6, Qt.DashDotLine))
-            for rect in d['embedded']:
-                r = fitz.Rect(rect)
-                qr = QRect(round(r.x0 * scale), round(r.y0 * scale),
-                           max(1, round(r.width * scale)), max(1, round(r.height * scale)))
-                if qr.intersects(visible):
-                    painter.drawRoundedRect(qr, 4, 4)
-            painter.setPen(QPen(QColor(RASTER), 6, Qt.DashLine))
-            for rect in d['images']:
-                r = fitz.Rect(rect)
-                qr = QRect(round(r.x0 * scale), round(r.y0 * scale),
-                           max(1, round(r.width * scale)), max(1, round(r.height * scale)))
-                if qr.intersects(visible):
-                    painter.drawRoundedRect(qr, 4, 4)
+            # Margem visual constante em pixels, independente do zoom.
+            # Os contornos ficam fora da arte para evitar confusão com cores similares.
+            indicator_margin_px = 5.0
+            def draw_indicators(rectangles, color, style):
+                pen = QPen(QColor(color), 2, style)
+                pen.setCosmetic(True)  # Espessura de 2 px em qualquer zoom.
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                for rect in rectangles:
+                    r = fitz.Rect(rect)
+                    if r.is_empty or r.is_infinite:
+                        continue
+                    qr = QRectF(r.x0 * scale, r.y0 * scale,
+                                max(1.0, r.width * scale), max(1.0, r.height * scale))
+                    qr.adjust(-indicator_margin_px, -indicator_margin_px,
+                              indicator_margin_px, indicator_margin_px)
+                    if qr.intersects(QRectF(visible)):
+                        painter.drawRoundedRect(qr, 4, 4)
+            draw_indicators(d['drawings'], VECTOR, Qt.SolidLine)
+            draw_indicators(d['embedded'], EMBEDDED, Qt.DashDotLine)
+            draw_indicators(d['images'], RASTER, Qt.DashLine)
         painter.end()
 
     def on_zoom_changed(self, value):
@@ -886,10 +1001,24 @@ class Verificador(QMainWindow):
         if self.doc is not None and hasattr(self, 'zoom_slider') and self.zoom_slider.value() == 0:
             self._fit_scale = 0.0
             self.render_page()
+    def _change_page(self, step):
+        if not self.doc or not (0 <= self.page_index + step < self.doc.page_count):
+            return
+        self._zoom_timer.stop()
+        self._pending_anchor = None
+        self.page_index += step
+        self._fit_scale = 0.0
+        self.render_page()
+        # A mensagem considera exclusivamente a página atual.
+        # Antes de analisar, navegar não exibe qualquer resultado.
+        if self.analysis and self.page_index < len(self.analysis):
+            GuidanceDialog(self.analysis[self.page_index]['vcount'] > 0, self).exec()
+
     def prev_page(self):
-        if self.doc and self.page_index > 0: self._zoom_timer.stop(); self._pending_anchor = None; self.page_index -= 1; self._fit_scale = 0.0; self.render_page()
+        self._change_page(-1)
+
     def next_page(self):
-        if self.doc and self.page_index < self.doc.page_count-1: self._zoom_timer.stop(); self._pending_anchor = None; self.page_index += 1; self._fit_scale = 0.0; self.render_page()
+        self._change_page(1)
     def save_report(self):
         if not self.report_text: return
         path, _ = QFileDialog.getSaveFileName(self, 'Salvar relatório', self.pdf_path.stem+'_triagem.txt', 'Texto (*.txt)')
