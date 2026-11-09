@@ -1,0 +1,67 @@
+name: Compilar aplicativo macOS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: macOS - ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: Apple_Silicon
+            runner: macos-15-arm64
+          - arch: Intel
+            runner: macos-15-intel
+
+    steps:
+      - name: Baixar codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller pillow
+
+      - name: Preparar icone macOS
+        run: |
+          mkdir -p build/icon.iconset
+          for entry in '16 16x16' '32 16x16@2x' '32 32x32' '64 32x32@2x' '128 128x128' '256 128x128@2x' '256 256x256' '512 256x256@2x' '512 512x512' '1024 512x512@2x'; do
+            set -- $entry
+            sips -z "$1" "$1" assets/logo_icone_1024.png --out "build/icon.iconset/icon_$2.png" >/dev/null
+          done
+          iconutil -c icns build/icon.iconset -o assets/logo_icone.icns
+
+      - name: Compilar aplicativo macOS
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed \
+            --name "Verificador_de_vetor_Cromotransfer" \
+            --icon assets/logo_icone.icns \
+            --collect-all PySide6 --collect-all pymupdf \
+            --add-data "assets:assets" app_desktop.py
+          test -d "dist/Verificador_de_vetor_Cromotransfer.app"
+
+      - name: Compactar aplicativo
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/Verificador_de_vetor_Cromotransfer.app" \
+            "dist/Verificador_Cromotransfer_macOS_${{ matrix.arch }}.zip"
+
+      - name: Disponibilizar aplicativo
+        uses: actions/upload-artifact@v4
+        with:
+          name: Verificador_Cromotransfer_macOS_${{ matrix.arch }}
+          path: dist/Verificador_Cromotransfer_macOS_${{ matrix.arch }}.zip
+          if-no-files-found: error
