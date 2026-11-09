@@ -1,4 +1,9 @@
 import math
+import json
+import os
+import subprocess
+import tempfile
+import time
 import traceback
 import sys
 from pathlib import Path
@@ -21,7 +26,7 @@ EMBEDDED = '#FFD900'
 BORDER = '#2C445D'
 BRAND_BLUE = '#2C445D'
 LOGO_COLOR = '#2C445D'
-APP_VERSION = '1.1.30'
+APP_VERSION = '1.1.31'
 
 def resource_path(relative_path):
     base = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
@@ -597,9 +602,9 @@ class Verificador(QMainWindow):
             self.preview.setUpdatesEnabled(True)
             self.preview.update()
         if old_doc is not None and old_doc is not new_doc:
-            # Deixar o Qt concluir o ciclo de eventos/pintura antes de liberar
-            # o documento antigo, prevenindo referências a páginas já fechadas.
-            QTimer.singleShot(700, old_doc.close)
+            # A renderização é concluída antes de sair de _load_pdf; não manter
+            # documentos antigos vivos durante a análise seguinte.
+            old_doc.close()
 
     def clear_selection(self):
         """Retorna ao estado inicial, descartando documento, contornos e cache."""
@@ -641,184 +646,56 @@ class Verificador(QMainWindow):
         self.preview.update()
 
     def analyze_pdf(self):
-        if not self.doc:
+        if not self.doc or not self.pdf_path:
             return
         self.analysis = []
         self.analyze_btn.setEnabled(False)
         QApplication.setOverrideCursor(Qt.WaitCursor)
+        log_path = Path.home() / 'Verificador_Cromotransfer_diagnostico.log'
         try:
-            self._analyze_pdf_contents()
+            # Each analysis runs in a fresh OS process. A crash in MuPDF/Qt
+            # cannot terminate the main application or corrupt the next run.
+            with tempfile.TemporaryDirectory(prefix='cromo_analise_') as tmp:
+                result_path = Path(tmp) / 'resultado.json'
+                if getattr(sys, 'frozen', False):
+                    command = [sys.executable, '--analyze-worker', str(self.pdf_path), str(result_path)]
+                else:
+                    command = [sys.executable, str(Path(__file__).resolve()),
+                               '--analyze-worker', str(self.pdf_path), str(result_path)]
+                flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+                completed = subprocess.run(command, capture_output=True, text=True,
+                                           timeout=180, creationflags=flags)
+                if completed.returncode != 0 or not result_path.exists():
+                    raise RuntimeError(f'Processo de análise encerrou com código {completed.returncode}. '
+                                       f'{completed.stderr[-1200:]}')
+                result = json.loads(result_path.read_text(encoding='utf-8'))
+                if 'error' in result:
+                    raise RuntimeError(result['error'])
+                if len(result['analysis']) != self.doc.page_count:
+                    raise RuntimeError('A quantidade de páginas analisadas não corresponde ao PDF aberto.')
+                self.analysis = result['analysis']
+                self.report_text = result['report_text']
+            self.update_summary()
+            self.update_guidance_card()
+            self.preview.update()
+            QApplication.restoreOverrideCursor()
+            try:
+                GuidanceDialog(self.analysis[self.page_index]['vcount'] > 0, self).exec()
+            finally:
+                QApplication.setOverrideCursor(Qt.WaitCursor)
         except Exception as exc:
             self.analysis = []
             self.report_text = ''
             self.summary.setText('Não foi possível concluir a análise deste PDF.')
+            with log_path.open('a', encoding='utf-8') as log:
+                log.write(f'\n{datetime.now().isoformat()} | {self.pdf_path} | {type(exc).__name__}: {exc}\n')
+                log.write(traceback.format_exc() + '\n')
             QMessageBox.critical(self, 'Erro na análise do PDF',
                                  f'{type(exc).__name__}: {exc}\n\n'
-                                 'O documento permanece aberto. Tente outro PDF.')
-            traceback.print_exc()
+                                 f'Diagnóstico salvo em: {log_path}')
         finally:
             QApplication.restoreOverrideCursor()
             self.analyze_btn.setEnabled(self.doc is not None)
-
-    def _analyze_pdf_contents(self):
-        report = ['VERIFICADOR DE VETOR - CROMOTRANSFER — RELATÓRIO DE TRIAGEM',
-                  f'Arquivo: {self.pdf_path.name}', f'Páginas: {self.doc.page_count}', '']
-        for i in range(self.doc.page_count):
-            page = self.doc.load_page(i)
-            drawings = page.get_drawings()
-            # Caminhos PDF podem ser auxiliares, repetidos ou ficar encobertos.
-            # Para preenchimentos pequenos de cor clara, verifica se ao menos
-            # alguns pixels da cor do preenchimento sobrevivem na página final.
-            # Não aplicar esse teste a texto escuro, traços ou gradientes.
-            rendered = None
-            rendered_pixels = None
-            rendered_scale = 1.0
-            seen_paths = set()
-            visible_drawings = []
-            for d in drawings:
-                r = d.get('rect')
-                if not r or r.is_empty:
-                    continue
-                clipped = fitz.Rect(r) & page.rect
-                if clipped.is_empty or clipped.width < 0.5 or clipped.height < 0.5:
-                    continue
-                fill = d.get('fill')
-                color = d.get('color')
-                key = (tuple(round(v, 2) for v in clipped), d.get('type'),
-                       tuple(round(v, 3) for v in fill) if fill else None,
-                       tuple(round(v, 3) for v in color) if color else None)
-                if key in seen_paths:
-                    continue
-                seen_paths.add(key)
-                # Formas pequenas com preenchimento colorido, mas totalmente
-                # ocultas no resultado renderizado, não devem ganhar contorno.
-                if (fill and d.get('type') == 'f' and min(fill) > 0.18
-                        and clipped.get_area() < page.rect.get_area() * 0.025):
-                    if rendered is None:
-                        # Limita a imagem auxiliar a ~4 milhões de pixels,
-                        # evitando picos de memória em PDFs de grande formato.
-                        area = max(1.0, page.rect.width * page.rect.height)
-                        rendered_scale = min(1.5, math.sqrt(4_000_000 / area))
-                        rendered = page.get_pixmap(
-                            matrix=fitz.Matrix(rendered_scale, rendered_scale),
-                            alpha=False)
-                        # samples cria uma cópia completa a cada acesso.
-                        # samples_mv mantém uma visão sem copiar o bitmap.
-                        rendered_pixels = rendered.samples_mv
-                    target = tuple(round(v * 255) for v in fill)
-                    matched = False
-                    for gy in range(1, 16):
-                        for gx in range(1, 16):
-                            px = min(rendered.width - 1, max(0, int((clipped.x0 + clipped.width * gx / 16) * rendered_scale)))
-                            py = min(rendered.height - 1, max(0, int((clipped.y0 + clipped.height * gy / 16) * rendered_scale)))
-                            offset = (py * rendered.width + px) * rendered.n
-                            rgb = rendered_pixels[offset:offset + 3]
-                            if len(rgb) == 3 and max(abs(rgb[k] - target[k]) for k in range(3)) <= 28:
-                                matched = True
-                                break
-                        if matched:
-                            break
-                    if not matched:
-                        continue
-                visible_drawings.append(tuple(clipped))
-            rendered_pixels = None
-            rendered = None
-            rects = visible_drawings
-            embedded, raster = [], []
-            try:
-                # O tipo de operação gráfica é mais confiável que xref:
-                # fill-shade representa sombreamento/gradiente, não um PNG.
-                # fill-image representa uma imagem de pixels, inclusive PNGs
-                # incorporados como XObject. O xref não define a categoria.
-                ops = page.get_bboxlog()
-                infos = page.get_image_info(xrefs=True)
-                shade_infos = [it for it in infos if not it.get('xref')]
-                raster_infos = [it for it in infos if it.get('xref')]
-                def valid_rect(bbox):
-                    if not bbox or len(bbox) != 4:
-                        return None
-                    vals = tuple(float(v) for v in bbox)
-                    if not all(math.isfinite(v) and abs(v) < 1_000_000 for v in vals):
-                        return None
-                    r = fitz.Rect(vals) & page.rect
-                    if r.is_empty or r.width < 0.5 or r.height < 0.5:
-                        return None
-                    return tuple(round(float(v), 3) for v in r)
-                # Os retângulos de fill-shade podem ser infinitos na API.
-                # Para esses casos, usamos as posições visíveis reportadas
-                # pelo extrator de imagens; nunca desenhamos bboxes infinitas.
-                shade_positions = [valid_rect(it.get('bbox')) for it in shade_infos]
-                shade_positions = [r for r in shade_positions if r]
-                # Evita duplicar a mesma região várias vezes por operações
-                # internas do Illustrator.
-                embedded = list(dict.fromkeys(shade_positions))
-                raster_positions = [valid_rect(it.get('bbox')) for it in raster_infos]
-                raster = list(dict.fromkeys(r for r in raster_positions if r))
-                # Outras imagens rasterizadas podem não ter xref. A lista
-                # bboxlog permite detectar fill-image mesmo nesses casos.
-                for kind, bbox in ops:
-                    if kind == 'fill-image':
-                        r = valid_rect(bbox)
-                        if r and r not in raster:
-                            raster.append(r)
-                # Nunca colocar uma imagem rasterizada em amarelo apenas
-                # porque está incorporada ao PDF.
-                embedded = [r for r in embedded if r not in raster]
-                # PDFs exportados pelo Illustrator podem usar gradientes / padrões
-                # dentro de um caminho de recorte sem criar imagem XObject.
-                # Nesses casos, get_image_info retorna bbox vazia e get_bboxlog
-                # retorna limites infinitos. A geometria útil está nos clips.
-                if any(kind == 'fill-shade' for kind, _ in ops):
-                    clip_candidates = []
-                    for path in page.get_drawings(extended=True):
-                        if path.get('type') != 'clip':
-                            continue
-                        scissor = path.get('scissor')
-                        if scissor is None:
-                            continue
-                        candidate = valid_rect(tuple(scissor))
-                        if candidate is None:
-                            continue
-                        rect = fitz.Rect(candidate)
-                        # Desconsiderar clips de página inteira e micro-recortes
-                        # de detalhes internos; manter a máscara principal.
-                        fraction = rect.get_area() / max(page.rect.get_area(), 1)
-                        if not 0.003 <= fraction <= 0.85:
-                            continue
-                        clip_candidates.append((path.get('level', 999), candidate))
-                    # Os clips de menor nível geralmente representam o objeto
-                    # externo, evitando dezenas de caixas sobre a mesma arte.
-                    if clip_candidates:
-                        min_level = min(level for level, _ in clip_candidates)
-                        main_clips = [r for level, r in clip_candidates
-                                      if level == min_level]
-                        for r in dict.fromkeys(main_clips):
-                            if r not in embedded and r not in raster:
-                                embedded.append(r)
-            except Exception as exc:
-                report.append(f'AVISO página {i+1}: falha ao inspecionar gráficos: {type(exc).__name__}: {exc}')
-                print(f'[Verificador] Falha ao inspecionar gráficos da página {i+1}: {exc}')
-            self.analysis.append({'drawings': rects, 'embedded': embedded,
-                                  'images': raster, 'vcount': len(rects),
-                                  'ecount': len(embedded), 'rcount': len(raster)})
-            report.append(f'Página {i+1}: vetores/desenhos={len(rects)}; '
-                          f'áreas de sombreamento/possível máscara={len(embedded)}; '
-                          f'imagens rasterizadas={len(raster)}')
-        report.extend(['', 'ATENÇÃO: classificação heurística, não certificação.',
-                       'Amarelo = sombreamentos/gradientes, possíveis efeitos associados a recortes.',
-                       'Vermelho = operações de imagem de pixels (raster).',
-                       'A detecção de sombreamento não comprova máscara de recorte.',
-                       'Ocorrências repetidas na mesma posição são agrupadas.'])
-        self.report_text = '\n'.join(report)
-        self.update_summary()
-        self.update_guidance_card()
-        self.preview.update()
-        QApplication.restoreOverrideCursor()
-        try:
-            dialog = GuidanceDialog(self.analysis[self.page_index]['vcount'] > 0, self)
-            dialog.exec()
-        finally:
-            QApplication.setOverrideCursor(Qt.WaitCursor)
 
     def update_guidance_card(self):
         """Orienta o comercial pelo resultado da página atualmente exibida."""
@@ -1028,6 +905,163 @@ class Verificador(QMainWindow):
             QMessageBox.information(self, 'Relatório salvo', 'O relatório foi salvo com sucesso.')
         except Exception as e: QMessageBox.critical(self, 'Erro ao salvar relatório', str(e))
 
+def analyze_document_isolated(pdf_path):
+    """Executed in a dedicated subprocess; native PDF failures cannot kill the GUI."""
+    doc = fitz.open(str(pdf_path))
+    analysis = []
+    try:
+        report = ['VERIFICADOR DE VETOR - CROMOTRANSFER — RELATÓRIO DE TRIAGEM',
+                  f'Arquivo: {pdf_path.name}', f'Páginas: {doc.page_count}', '']
+        for i in range(doc.page_count):
+            page = doc.load_page(i)
+            drawings = page.get_drawings()
+            # Caminhos PDF podem ser auxiliares, repetidos ou ficar encobertos.
+            # Para preenchimentos pequenos de cor clara, verifica se ao menos
+            # alguns pixels da cor do preenchimento sobrevivem na página final.
+            # Não aplicar esse teste a texto escuro, traços ou gradientes.
+            rendered = None
+            rendered_pixels = None
+            rendered_scale = 1.0
+            seen_paths = set()
+            visible_drawings = []
+            for d in drawings:
+                r = d.get('rect')
+                if not r or r.is_empty:
+                    continue
+                clipped = fitz.Rect(r) & page.rect
+                if clipped.is_empty or clipped.width < 0.5 or clipped.height < 0.5:
+                    continue
+                fill = d.get('fill')
+                color = d.get('color')
+                key = (tuple(round(v, 2) for v in clipped), d.get('type'),
+                       tuple(round(v, 3) for v in fill) if fill else None,
+                       tuple(round(v, 3) for v in color) if color else None)
+                if key in seen_paths:
+                    continue
+                seen_paths.add(key)
+                # Formas pequenas com preenchimento colorido, mas totalmente
+                # ocultas no resultado renderizado, não devem ganhar contorno.
+                if (fill and d.get('type') == 'f' and min(fill) > 0.18
+                        and clipped.get_area() < page.rect.get_area() * 0.025):
+                    if rendered is None:
+                        # Limita a imagem auxiliar a ~4 milhões de pixels,
+                        # evitando picos de memória em PDFs de grande formato.
+                        area = max(1.0, page.rect.width * page.rect.height)
+                        rendered_scale = min(1.5, math.sqrt(4_000_000 / area))
+                        rendered = page.get_pixmap(
+                            matrix=fitz.Matrix(rendered_scale, rendered_scale),
+                            alpha=False)
+                        # samples cria uma cópia completa a cada acesso.
+                        # samples_mv mantém uma visão sem copiar o bitmap.
+                        rendered_pixels = rendered.samples_mv
+                    target = tuple(round(v * 255) for v in fill)
+                    matched = False
+                    for gy in range(1, 16):
+                        for gx in range(1, 16):
+                            px = min(rendered.width - 1, max(0, int((clipped.x0 + clipped.width * gx / 16) * rendered_scale)))
+                            py = min(rendered.height - 1, max(0, int((clipped.y0 + clipped.height * gy / 16) * rendered_scale)))
+                            offset = (py * rendered.width + px) * rendered.n
+                            rgb = rendered_pixels[offset:offset + 3]
+                            if len(rgb) == 3 and max(abs(rgb[k] - target[k]) for k in range(3)) <= 28:
+                                matched = True
+                                break
+                        if matched:
+                            break
+                    if not matched:
+                        continue
+                visible_drawings.append(tuple(clipped))
+            rendered_pixels = None
+            rendered = None
+            rects = visible_drawings
+            embedded, raster = [], []
+            try:
+                # O tipo de operação gráfica é mais confiável que xref:
+                # fill-shade representa sombreamento/gradiente, não um PNG.
+                # fill-image representa uma imagem de pixels, inclusive PNGs
+                # incorporados como XObject. O xref não define a categoria.
+                ops = page.get_bboxlog()
+                infos = page.get_image_info(xrefs=True)
+                shade_infos = [it for it in infos if not it.get('xref')]
+                raster_infos = [it for it in infos if it.get('xref')]
+                def valid_rect(bbox):
+                    if not bbox or len(bbox) != 4:
+                        return None
+                    vals = tuple(float(v) for v in bbox)
+                    if not all(math.isfinite(v) and abs(v) < 1_000_000 for v in vals):
+                        return None
+                    r = fitz.Rect(vals) & page.rect
+                    if r.is_empty or r.width < 0.5 or r.height < 0.5:
+                        return None
+                    return tuple(round(float(v), 3) for v in r)
+                # Os retângulos de fill-shade podem ser infinitos na API.
+                # Para esses casos, usamos as posições visíveis reportadas
+                # pelo extrator de imagens; nunca desenhamos bboxes infinitas.
+                shade_positions = [valid_rect(it.get('bbox')) for it in shade_infos]
+                shade_positions = [r for r in shade_positions if r]
+                # Evita duplicar a mesma região várias vezes por operações
+                # internas do Illustrator.
+                embedded = list(dict.fromkeys(shade_positions))
+                raster_positions = [valid_rect(it.get('bbox')) for it in raster_infos]
+                raster = list(dict.fromkeys(r for r in raster_positions if r))
+                # Outras imagens rasterizadas podem não ter xref. A lista
+                # bboxlog permite detectar fill-image mesmo nesses casos.
+                for kind, bbox in ops:
+                    if kind == 'fill-image':
+                        r = valid_rect(bbox)
+                        if r and r not in raster:
+                            raster.append(r)
+                # Nunca colocar uma imagem rasterizada em amarelo apenas
+                # porque está incorporada ao PDF.
+                embedded = [r for r in embedded if r not in raster]
+                # PDFs exportados pelo Illustrator podem usar gradientes / padrões
+                # dentro de um caminho de recorte sem criar imagem XObject.
+                # Nesses casos, get_image_info retorna bbox vazia e get_bboxlog
+                # retorna limites infinitos. A geometria útil está nos clips.
+                if any(kind == 'fill-shade' for kind, _ in ops):
+                    clip_candidates = []
+                    for path in page.get_drawings(extended=True):
+                        if path.get('type') != 'clip':
+                            continue
+                        scissor = path.get('scissor')
+                        if scissor is None:
+                            continue
+                        candidate = valid_rect(tuple(scissor))
+                        if candidate is None:
+                            continue
+                        rect = fitz.Rect(candidate)
+                        # Desconsiderar clips de página inteira e micro-recortes
+                        # de detalhes internos; manter a máscara principal.
+                        fraction = rect.get_area() / max(page.rect.get_area(), 1)
+                        if not 0.003 <= fraction <= 0.85:
+                            continue
+                        clip_candidates.append((path.get('level', 999), candidate))
+                    # Os clips de menor nível geralmente representam o objeto
+                    # externo, evitando dezenas de caixas sobre a mesma arte.
+                    if clip_candidates:
+                        min_level = min(level for level, _ in clip_candidates)
+                        main_clips = [r for level, r in clip_candidates
+                                      if level == min_level]
+                        for r in dict.fromkeys(main_clips):
+                            if r not in embedded and r not in raster:
+                                embedded.append(r)
+            except Exception as exc:
+                report.append(f'AVISO página {i+1}: falha ao inspecionar gráficos: {type(exc).__name__}: {exc}')
+                print(f'[Verificador] Falha ao inspecionar gráficos da página {i+1}: {exc}')
+            analysis.append({'drawings': rects, 'embedded': embedded,
+                                  'images': raster, 'vcount': len(rects),
+                                  'ecount': len(embedded), 'rcount': len(raster)})
+            report.append(f'Página {i+1}: vetores/desenhos={len(rects)}; '
+                          f'áreas de sombreamento/possível máscara={len(embedded)}; '
+                          f'imagens rasterizadas={len(raster)}')
+        report.extend(['', 'ATENÇÃO: classificação heurística, não certificação.',
+                       'Amarelo = sombreamentos/gradientes, possíveis efeitos associados a recortes.',
+                       'Vermelho = operações de imagem de pixels (raster).',
+                       'A detecção de sombreamento não comprova máscara de recorte.',
+                       'Ocorrências repetidas na mesma posição são agrupadas.'])
+        return analysis, '\n'.join(report)
+    finally:
+        doc.close()
+
 def main():
     app = QApplication(sys.argv); app.setApplicationName('Verificador de vetor - Cromotransfer'); app.setApplicationVersion(APP_VERSION); app.setFont(QFont('Segoe UI', 11)); app.setStyle('Fusion')
     icon_path = resource_path('assets/logo_icone.ico')
@@ -1040,4 +1074,19 @@ def main():
     w = Verificador(); w.show()
     if splash is not None: splash.finish(w)
     sys.exit(app.exec())
-if __name__ == '__main__': main()
+def worker_main():
+    pdf_path = Path(sys.argv[2])
+    output_path = Path(sys.argv[3])
+    try:
+        analysis, report_text = analyze_document_isolated(pdf_path)
+        output_path.write_text(json.dumps({'analysis': analysis, 'report_text': report_text},
+                                          ensure_ascii=False), encoding='utf-8')
+    except Exception as exc:
+        output_path.write_text(json.dumps({'error': f'{type(exc).__name__}: {exc}'}), encoding='utf-8')
+        raise
+
+if __name__ == '__main__':
+    if len(sys.argv) >= 4 and sys.argv[1] == '--analyze-worker':
+        worker_main()
+    else:
+        main()
