@@ -1,0 +1,1 @@
+V11.23: restaurado o preenchimento do balão laranja por trás da carinha, sem alterar a carinha; botão FECHAR elevado 12 px para aumentar a margem inferior.
